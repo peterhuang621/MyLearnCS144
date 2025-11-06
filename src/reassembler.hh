@@ -1,6 +1,10 @@
 #pragma once
 
 #include "byte_stream.hh"
+#include <algorithm>
+#include <iterator>
+#include <map>
+#include <optional>
 
 class Reassembler
 {
@@ -43,4 +47,9 @@ public:
 
 private:
   ByteStream output_;
+  uint64_t total_pending {};
+  std::optional<uint64_t> end_ind {};
+  std::map<uint64_t, std::string> buf {};
+  bool is_wholetask_finished() const;
+  void update_end_ind( const uint64_t new_index );
 };
