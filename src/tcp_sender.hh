@@ -5,13 +5,31 @@
 #include "tcp_sender_message.hh"
 
 #include <functional>
+#include <queue>
+
+class Timer
+{
+private:
+  uint64_t init_RTO_ms {}, curr_RTO_ms {}, time_ms {};
+  bool valid { false };
+
+public:
+  explicit Timer( uint64_t init_RTO ) : init_RTO_ms( init_RTO ), curr_RTO_ms( init_RTO ), time_ms( 0 ) {}
+  void start();
+  void reset();
+  void inValid();
+  void tick( uint64_t time_since_last_tick );
+  void exp_Backoff();
+  bool isValid() const;
+  bool isExpired() const;
+};
 
 class TCPSender
 {
 public:
   /* Construct TCP sender with given default Retransmission Timeout and possible ISN */
   TCPSender( ByteStream&& input, Wrap32 isn, uint64_t initial_RTO_ms )
-    : input_( std::move( input ) ), isn_( isn ), initial_RTO_ms_( initial_RTO_ms )
+    : input_( std::move( input ) ), isn_( isn ), initial_RTO_ms_( initial_RTO_ms ), timer( initial_RTO_ms )
   {}
 
   /* Generate an empty TCPSenderMessage */
@@ -42,4 +60,10 @@ private:
   ByteStream input_;
   Wrap32 isn_;
   uint64_t initial_RTO_ms_;
+
+  bool isSYN { false }, isFIN { false };
+  uint64_t outstanding_count {}, retransmissions_count { 0 }, window_size { 1 }, ackno_ { 0 }, sentno_ { 0 };
+  std::queue<TCPSenderMessage> outstanding_message_;
+
+  Timer timer;
 };
