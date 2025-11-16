@@ -18,8 +18,36 @@ uint64_t TCPSender::consecutive_retransmissions() const
 
 void TCPSender::push( const TransmitFunction& transmit )
 {
-  debug( "unimplemented push() called" );
-  (void)transmit;
+  const uint64_t available_space = window_size ? window_size : 1;
+  uint64_t payload_size { 0 };
+  TCPSenderMessage msg;
+
+  while ( available_space > outstanding_count ) {
+    msg = make_empty_message();
+    if ( isFIN )
+      break;
+    if ( !isSYN )
+      msg.SYN = isSYN = true;
+
+    msg.seqno = Wrap32::wrap( sentno_, isn_ );
+    payload_size = min( TCPConfig::MAX_PAYLOAD_SIZE, available_space - outstanding_count - msg.SYN );
+
+    read( input_.reader(), payload_size, msg.payload );
+
+    if ( !isFIN && reader().is_finished() && outstanding_count + msg.sequence_length() < available_space )
+      msg.FIN = isFIN = true;
+
+    if ( msg.sequence_length() == 0 )
+      return;
+
+    transmit( msg );
+    if ( !timer.isValid() )
+      timer.start();
+
+    sentno_ += msg.sequence_length();
+    outstanding_count += msg.sequence_length();
+    outstanding_message_.emplace( std::move( msg ) );
+  }
 }
 
 TCPSenderMessage TCPSender::make_empty_message() const
@@ -30,18 +58,23 @@ TCPSenderMessage TCPSender::make_empty_message() const
 void TCPSender::receive( const TCPReceiverMessage& msg )
 {
   window_size = msg.window_size;
-  if ( msg.RST || !msg.ackno.has_value() )
+  if ( msg.RST ) {
+    input_.set_error();
+    return;
+  }
+
+  if ( input_.has_error() || !msg.ackno.has_value() )
     return;
   const uint64_t abs_ackno = msg.ackno.value().unwrap( isn_, sentno_ );
   if ( abs_ackno > sentno_ )
     return;
-  ackno_ = abs_ackno;
 
   bool hasackmsg { false };
   while ( outstanding_message_.size() ) {
     TCPSenderMessage& item = outstanding_message_.front();
-    if ( item.sequence_length() + item.seqno.unwrap( isn_, sentno_ ) <= abs_ackno ) {
+    if ( item.sequence_length() + ackno_ <= abs_ackno ) {
       outstanding_count -= item.sequence_length();
+      ackno_ += item.sequence_length();
       outstanding_message_.pop();
 
       hasackmsg = true;
@@ -53,12 +86,11 @@ void TCPSender::receive( const TCPReceiverMessage& msg )
   if ( hasackmsg ) {
     timer.reset();
     retransmissions_count = 0;
-  }
-
-  if ( outstanding_message_.empty() ) {
-    timer.inValid();
-  } else {
-    timer.start();
+    if ( outstanding_message_.empty() ) {
+      timer.inValid();
+    } else {
+      timer.start();
+    }
   }
 }
 
@@ -78,6 +110,7 @@ void TCPSender::tick( uint64_t ms_since_last_tick, const TransmitFunction& trans
 void Timer::start()
 {
   valid = true;
+  time_ms = 0;
 }
 
 void Timer::reset()
@@ -88,6 +121,7 @@ void Timer::reset()
 void Timer::inValid()
 {
   valid = false;
+  time_ms = 0;
 }
 
 void Timer::tick( uint64_t time_since_last_tick )
