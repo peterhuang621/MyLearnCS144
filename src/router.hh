@@ -5,6 +5,12 @@
 
 #include <optional>
 
+struct info
+{
+  size_t interface_num;
+  std::optional<Address> next_hop;
+};
+
 // \brief A router that has multiple network interfaces and
 // performs longest-prefix-match routing between them.
 class Router
@@ -34,4 +40,7 @@ public:
 private:
   // The router's collection of network interfaces
   std::vector<std::shared_ptr<NetworkInterface>> interfaces_ {};
+
+  std::array<std::unordered_map<uint32_t, info>, 33> routing_tables;
+  std::optional<info> match( uint32_t request_ip );
 };
